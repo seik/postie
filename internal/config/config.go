@@ -264,6 +264,9 @@ type ServerConfig struct {
 	CheckOnly *bool `yaml:"check_only,omitempty" json:"check_only,omitempty"`
 	// Inflight sets the number of concurrent requests per connection. 0 defaults to 1 in nntppool v4.
 	Inflight int `yaml:"inflight" json:"inflight"`
+	// IPFamily restricts the connection to IPv4 (4) or IPv6 (6); 0 lets the
+	// resolver choose. Ignored with a proxy.
+	IPFamily int `yaml:"ip_family,omitempty" json:"ip_family,omitempty"`
 	// SOCKS5 Proxy URL (optional, format: socks5://username:password@hostname:port)
 	ProxyURL string `yaml:"proxy_url,omitempty" json:"proxy_url,omitempty"`
 }
@@ -728,6 +731,10 @@ func (c *ConfigData) Validate() error {
 		if s.MaxConnections <= 0 {
 			return fmt.Errorf("server %d: max_connections must be positive", i)
 		}
+
+		if s.IPFamily != 0 && s.IPFamily != 4 && s.IPFamily != 6 {
+			return fmt.Errorf("server %d: ip_family must be 4 or 6", i)
+		}
 	}
 
 	// Validate that no two servers share the same host+username (would collide in nntppool)
@@ -887,6 +894,28 @@ func ServerConfigToProvider(s ServerConfig) nntppool.Provider {
 			InsecureSkipVerify: s.InsecureSSL, //nolint:gosec // user-configurable option
 			ServerName:         s.Host,
 		}
+	}
+
+	if s.ProxyURL == "" && (s.IPFamily == 4 || s.IPFamily == 6) {
+		network := fmt.Sprintf("tcp%d", s.IPFamily)
+		tlsCfg := provider.TLSConfig
+		provider.Factory = func(ctx context.Context) (net.Conn, error) {
+			var dialer net.Dialer
+			conn, err := dialer.DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			if tlsCfg != nil {
+				tlsConn := tls.Client(conn, tlsCfg)
+				if err := tlsConn.HandshakeContext(ctx); err != nil {
+					_ = conn.Close()
+					return nil, fmt.Errorf("TLS handshake failed: %w", err)
+				}
+				return tlsConn, nil
+			}
+			return conn, nil
+		}
+		provider.TLSConfig = nil
 	}
 
 	// Support SOCKS5 proxy via custom connection factory
