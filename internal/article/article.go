@@ -2,7 +2,9 @@ package article
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"maps"
@@ -175,6 +177,43 @@ func GenerateMessageID() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%s@%s.%s", rand32, rand8, rand3), nil
+}
+
+const (
+	keyedRandomChars = 24
+	keyedTagChars    = 8
+	messageIDCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+)
+
+// KeyedMessageIDTag is the tag the keyed format appends to random: one
+// charset character per byte of HMAC-SHA256(key, random).
+func KeyedMessageIDTag(key []byte, random string) string {
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(random))
+	digest := mac.Sum(nil)
+	tag := make([]byte, keyedTagChars)
+	for i := range tag {
+		tag[i] = messageIDCharset[int(digest[i])%len(messageIDCharset)]
+	}
+	return string(tag)
+}
+
+// GenerateKeyedMessageID generates a message ID shaped like GenerateMessageID
+// whose local part ends in the keyed tag of its first 24 characters.
+func GenerateKeyedMessageID(key []byte) (string, error) {
+	random, err := generateRandomString(keyedRandomChars)
+	if err != nil {
+		return "", err
+	}
+	rand8, err := generateRandomString(8)
+	if err != nil {
+		return "", err
+	}
+	rand3, err := generateRandomString(3)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s%s@%s.%s", random, KeyedMessageIDTag(key, random), rand8, rand3), nil
 }
 
 // GenerateFrom generates a From header following the obfuscation pattern

@@ -230,6 +230,15 @@ func (p *Postie) Close() {
 	}
 }
 
+// par2Error is what a PAR2 failure means for the upload: nothing when the
+// files may go without recovery data, the error itself when par2.required.
+func (p *Postie) par2Error(err error) error {
+	if p.par2Cfg.Required {
+		return fmt.Errorf("par2: %w", err)
+	}
+	return nil
+}
+
 // CleanupPar2Files removes PAR2 files for the given source file
 // This method can be called when a job fails permanently to clean up orphaned PAR2 files
 func (p *Postie) CleanupPar2Files(ctx context.Context, sourceFile fileinfo.FileInfo) {
@@ -416,7 +425,7 @@ func (p *Postie) postInParallel(
 				slog.ErrorContext(ctx, "Error during par2 creation. Upload will continue without par2.", "error", err)
 			}
 
-			return nil
+			return p.par2Error(err)
 		}
 		p.trackGenerated(par2Res)
 
@@ -427,7 +436,7 @@ func (p *Postie) postInParallel(
 			}
 			dropPar2FromNZB(nzbGen, par2Paths)
 
-			return nil
+			return p.par2Error(err)
 		}
 
 		return nil
@@ -681,6 +690,9 @@ func (p *Postie) postFolder(ctx context.Context, files []fileinfo.FileInfo, root
 					if !errors.Is(err, context.Canceled) {
 						slog.ErrorContext(ctx, "Error during par2 creation. Upload will continue without par2.", "error", err)
 					}
+					if err := p.par2Error(err); err != nil {
+						return "", err
+					}
 					// Continue without PAR2 files
 				} else {
 					p.trackGenerated(par2Res)
@@ -751,7 +763,7 @@ func (p *Postie) postFolder(ctx context.Context, files []fileinfo.FileInfo, root
 				if !errors.Is(err, context.Canceled) {
 					slog.ErrorContext(ctx, "Error during par2 creation. Upload will continue without par2.", "error", err)
 				}
-				return nil
+				return p.par2Error(err)
 			}
 			p.trackGenerated(par2Res)
 
@@ -766,7 +778,7 @@ func (p *Postie) postFolder(ctx context.Context, files []fileinfo.FileInfo, root
 					slog.ErrorContext(ctx, "Error during upload of par2 files. Upload will continue without par2.", "error", err)
 				}
 				dropPar2FromNZB(nzbGen, par2Paths)
-				return nil
+				return p.par2Error(err)
 			}
 			return nil
 		})

@@ -129,6 +129,11 @@ const (
 	MessageIDFormatNXG MessageIDFormat = "nxg"
 	// Random: the Message-ID will be a random string of 32 characters
 	MessageIDFormatRandom MessageIDFormat = "random"
+	// Keyed: shaped like Random, but the last 8 characters of the local part
+	// are an HMAC of the first 24 under the key in message_id_key_file, so the
+	// key holder can recognise its own articles. To anyone else the IDs look
+	// like Random ones.
+	MessageIDFormatKeyed MessageIDFormat = "keyed"
 )
 
 type ObfuscationPolicy string
@@ -215,6 +220,9 @@ type Par2Config struct {
 	// "auto" lets par2go pick a safe kernel for the CPU; anything else forces
 	// that kernel even if the CPU does not support it (PAR2 creation then fails).
 	GF16Method string `yaml:"gf16_method" json:"gf16_method"`
+	// Required makes a failed PAR2 creation fail the upload instead of posting
+	// the files without recovery data. Default value is `false`.
+	Required bool `yaml:"required" json:"required"`
 }
 
 const Par2GF16MethodAuto = "auto"
@@ -320,7 +328,10 @@ type PostingConfig struct {
 	Groups             []NewsgroupConfig `yaml:"groups" json:"groups"`
 	ThrottleRate       int64             `yaml:"throttle_rate" json:"throttle_rate"` // bytes per second
 	MessageIDFormat    MessageIDFormat   `yaml:"message_id_format" json:"message_id_format"`
-	PostHeaders        PostHeaders       `yaml:"post_headers" json:"post_headers"`
+	// MessageIDKeyFile holds the key of the keyed Message-ID format; surrounding
+	// whitespace is ignored. Required when message_id_format is `keyed`.
+	MessageIDKeyFile string      `yaml:"message_id_key_file" json:"message_id_key_file"`
+	PostHeaders      PostHeaders `yaml:"post_headers" json:"post_headers"`
 	// If true the uploaded subject and filename will be obfuscated. Default value is `true`.
 	ObfuscationPolicy     ObfuscationPolicy `yaml:"obfuscation_policy" json:"obfuscation_policy"`
 	Par2ObfuscationPolicy ObfuscationPolicy `yaml:"par2_obfuscation_policy" json:"par2_obfuscation_policy"`
@@ -737,6 +748,9 @@ func (c *ConfigData) Validate() error {
 	}
 	if len(c.Posting.Groups) == 0 {
 		return fmt.Errorf("posting groups are required")
+	}
+	if c.Posting.MessageIDFormat == MessageIDFormatKeyed && c.Posting.MessageIDKeyFile == "" {
+		return fmt.Errorf("message_id_format %q needs message_id_key_file", MessageIDFormatKeyed)
 	}
 
 	// Validate compression configuration

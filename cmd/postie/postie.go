@@ -25,8 +25,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "postie",
-	Short: "Postie is a tool for uploading files",
+	Use:          "postie",
+	SilenceUsage: true,
+	Short:        "Postie is a tool for uploading files",
 	Long: `Postie is a command-line tool for uploading files to various destinations.
 It supports configuration via a YAML file and can process multiple files in a directory.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -41,6 +42,9 @@ It supports configuration via a YAML file and can process multiple files in a di
 			dirPath = filepath.Dir(inputFile)
 		} else {
 			var err error
+			if dirPath, err = filepath.Abs(dirPath); err != nil {
+				return err
+			}
 			files, err = collectDirectoryFiles(dirPath, ignorePatterns)
 			if err != nil {
 				return err
@@ -83,8 +87,14 @@ It supports configuration via a YAML file and can process multiple files in a di
 		// Start posting
 		slog.InfoContext(ctx, "Starting upload from directory", "dir", dirPath)
 
-		// CLI mode: use config-based folder mode decision (not forced)
-		_, err = poster.Post(ctx, files, dirPath, outputDir, inputFile == "")
+		// A directory is posted as one folder named after it: one PAR2 set
+		// and one NZB. Post takes the folder from the first path below its
+		// root, so the root is the directory's parent.
+		if inputFile == "" {
+			_, err = poster.Post(ctx, files, filepath.Dir(dirPath), outputDir, true)
+		} else {
+			_, err = poster.Post(ctx, files, dirPath, outputDir, false)
+		}
 		return err
 	},
 }
@@ -118,7 +128,12 @@ func collectDirectoryFiles(dir string, patterns []string) ([]fileinfo.FileInfo, 
 				return nil
 			}
 		}
-		files = append(files, fileinfo.FileInfo{Path: path, Size: uint64(info.Size())})
+		// The NZB names each file by its path below dir.
+		relative, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, fileinfo.FileInfo{Path: path, Size: uint64(info.Size()), RelativePath: filepath.ToSlash(relative)})
 		return nil
 	})
 	return files, err

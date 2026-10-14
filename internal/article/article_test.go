@@ -368,3 +368,28 @@ func TestGenerateRandomString(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyedMessageIDTag(t *testing.T) {
+	// The same vector is checked by the key holder's own implementation.
+	if got := KeyedMessageIDTag([]byte("secret-key"), "abcdefghijklmnopqrstuvwx"); got != "XaMPBcbf" {
+		t.Fatalf("tag = %q", got)
+	}
+}
+
+func TestGenerateKeyedMessageID(t *testing.T) {
+	key := []byte("secret-key")
+	id, err := GenerateKeyedMessageID(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, domain, ok := strings.Cut(id, "@")
+	if !ok || len(local) != 32 || len(domain) != 12 || domain[8] != '.' {
+		t.Fatalf("shape of %q", id)
+	}
+	if local[24:] != KeyedMessageIDTag(key, local[:24]) {
+		t.Fatalf("tag of %q", id)
+	}
+	if local[24:] == KeyedMessageIDTag([]byte("other"), local[:24]) {
+		t.Fatalf("tag of %q does not depend on the key", id)
+	}
+}

@@ -1,6 +1,7 @@
 package poster
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"errors"
@@ -226,15 +227,17 @@ func (s *Stats) snapshot() StatsSnapshot {
 
 // Poster handles posting articles to Usenet
 type poster struct {
-	cfg         config.PostingConfig
-	checkCfg    config.PostCheck
-	uploadPool  pool.NNTPClient // Pool for posting articles
-	verifyPool  pool.NNTPClient // Pool for article verification (may be same as uploadPool)
-	stats       *Stats
-	throttle    *Throttle
-	jobProgress progress.JobProgress
-	closed      atomic.Bool
-	closeOnce   sync.Once
+	cfg config.PostingConfig
+	// messageIDKey is the key of the keyed Message-ID format.
+	messageIDKey []byte
+	checkCfg     config.PostCheck
+	uploadPool   pool.NNTPClient // Pool for posting articles
+	verifyPool   pool.NNTPClient // Pool for article verification (may be same as uploadPool)
+	stats        *Stats
+	throttle     *Throttle
+	jobProgress  progress.JobProgress
+	closed       atomic.Bool
+	closeOnce    sync.Once
 
 	// Shared upload worker pool. Sized once to the total number of upload-pool
 	// connections so concurrent Post() calls share workers instead of each
@@ -331,6 +334,17 @@ func NewWithEngine(ctx context.Context, cfg config.Config, poolManager pool.Pool
 		jobProgress:  jobProgress,
 		engine:       engine,
 		manifestSink: manifestSink,
+	}
+
+	if p.cfg.MessageIDFormat == config.MessageIDFormatKeyed {
+		key, err := os.ReadFile(p.cfg.MessageIDKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading message_id_key_file: %w", err)
+		}
+		p.messageIDKey = bytes.TrimSpace(key)
+		if len(p.messageIDKey) == 0 {
+			return nil, fmt.Errorf("message_id_key_file %s is empty", p.cfg.MessageIDKeyFile)
+		}
 	}
 
 	// Size the shared upload worker pool to the total number of upload-pool
@@ -1408,14 +1422,22 @@ func (p *poster) addPost(ctx context.Context, filePath string, displayName strin
 		partNumber := i + 1
 
 		messageID := ""
-		if p.cfg.MessageIDFormat == config.MessageIDFormatRandom {
+		switch p.cfg.MessageIDFormat {
+		case config.MessageIDFormatRandom:
 			msgID, err := article.GenerateMessageID()
 			if err != nil {
 				return fmt.Errorf("error generating message ID: %w", err)
 			}
 
 			messageID = msgID
-		} else {
+		case config.MessageIDFormatKeyed:
+			msgID, err := article.GenerateKeyedMessageID(p.messageIDKey)
+			if err != nil {
+				return fmt.Errorf("error generating message ID: %w", err)
+			}
+
+			messageID = msgID
+		default:
 			msgID, err := nxgHeader.GenerateSegmentID(partType, int64(partNumber))
 			if err != nil {
 				return fmt.Errorf("error generating message ID: %w", err)
@@ -1451,7 +1473,7 @@ func (p *poster) addPost(ctx context.Context, filePath string, displayName strin
 			_, _ = fmt.Fprintf(hasher, "%s%d", fileName, partNumber)
 			fName = fmt.Sprintf("%x", hasher.Sum(nil))
 
-			if p.cfg.MessageIDFormat == config.MessageIDFormatRandom {
+			if p.cfg.MessageIDFormat != config.MessageIDFormatNXG {
 				hasher := md5.New()
 				_, _ = hasher.Write([]byte(subject))
 				subject = fmt.Sprintf("%x", hasher.Sum(nil))
