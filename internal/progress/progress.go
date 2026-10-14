@@ -140,6 +140,8 @@ func (pm *jobProgress) AddProgress(
 			}),
 			progressbar.OptionSetMaxDetailRow(0),
 			progressbar.OptionSetPredictTime(true),
+			// Redrawn every 100 ms, a bar is noise in a log file.
+			progressbar.OptionSetVisibility(stdoutIsTerminal),
 		),
 	}
 
@@ -406,3 +408,8 @@ func (p *progress) SetWaitDeadline(deadline time.Time) {
 	defer p.mu.Unlock()
 	p.waitDeadline = deadline
 }
+
+var stdoutIsTerminal = func() bool {
+	info, err := os.Stdout.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}()
