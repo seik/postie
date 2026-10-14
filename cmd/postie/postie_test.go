@@ -84,7 +84,7 @@ func TestCollectDirectoryFiles(t *testing.T) {
 		want     []string
 	}{
 		{"no patterns", nil, []string{"download.!ut", "download.part", "download.tmp", "file,with,commas.txt", "folder.tmp/keep.txt", "keep.txt", "nested/download.tmp", "nested/keep.txt"}},
-		{"temporary files", []string{"*.tmp", "*.part", "*.!ut"}, []string{"file,with,commas.txt", "folder.tmp/keep.txt", "keep.txt", "nested/keep.txt"}},
+		{"temporary files and folders", []string{"*.tmp", "*.part", "*.!ut"}, []string{"file,with,commas.txt", "keep.txt", "nested/keep.txt"}},
 		{"all files ignored", []string{"*"}, []string{}},
 		{"literal commas", []string{"file,with,commas.txt"}, []string{"download.!ut", "download.part", "download.tmp", "folder.tmp/keep.txt", "keep.txt", "nested/download.tmp", "nested/keep.txt"}},
 		{"stars inside character class", []string{"[*[]"}, []string{"download.!ut", "download.part", "download.tmp", "file,with,commas.txt", "folder.tmp/keep.txt", "keep.txt", "nested/download.tmp", "nested/keep.txt"}},
@@ -103,6 +103,9 @@ func TestCollectDirectoryFiles(t *testing.T) {
 					t.Fatal(err)
 				}
 				got = append(got, filepath.ToSlash(rel))
+				if file.RelativePath != filepath.ToSlash(rel) {
+					t.Errorf("%s relative path = %q", rel, file.RelativePath)
+				}
 				if file.Size != uint64(len("content")) {
 					t.Errorf("%s size = %d, want %d", rel, file.Size, len("content"))
 				}

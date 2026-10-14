@@ -106,7 +106,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&outputDir, "output-dir", "o", ".", "Directory to output files to")
 
 	rootCmd.PersistentFlags().StringVarP(&inputFile, "input-file", "i", "", "File to upload. If provided, the directory will be ignored.")
-	rootCmd.Flags().StringArrayVar(&ignorePatterns, "ignore-pattern", nil, "Ignore files matching a basename glob during directory uploads (repeatable; ignored with --input-file)")
+	rootCmd.Flags().StringArrayVar(&ignorePatterns, "ignore-pattern", nil, "Ignore files and directories matching a basename glob during directory uploads (repeatable; ignored with --input-file)")
 }
 
 func collectDirectoryFiles(dir string, patterns []string) ([]fileinfo.FileInfo, error) {
@@ -120,13 +120,16 @@ func collectDirectoryFiles(dir string, patterns []string) ([]fileinfo.FileInfo, 
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
-			return nil
-		}
 		for _, pattern := range patterns {
-			if matched, _ := filepath.Match(pattern, info.Name()); matched {
+			if matched, _ := filepath.Match(pattern, info.Name()); matched && path != dir {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
 				return nil
 			}
+		}
+		if info.IsDir() {
+			return nil
 		}
 		// The NZB names each file by its path below dir.
 		relative, err := filepath.Rel(dir, path)
