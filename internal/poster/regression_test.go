@@ -2,6 +2,7 @@ package poster
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -305,4 +306,22 @@ func TestSharedThrottle_OneBucketPerEngine(t *testing.T) {
 	standalone := nilEngine.SharedThrottle(1024)
 	require.NotNil(t, standalone, "nil engine falls back to a private throttle")
 	assert.NotSame(t, t1, standalone)
+}
+
+func TestPostYencRetryingWaitsOutDroppedConnections(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockPool := mocks.NewMockNNTPClient(ctrl)
+	dropped := errors.New("nntp: post failed: host:563+u: read tcp4 10.0.0.1:1->10.0.0.2:563: use of closed network connection")
+	mockPool.EXPECT().PostYenc(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, dropped).Times(4)
+	mockPool.EXPECT().PostYenc(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).Times(1)
+	art := &article.Article{MessageID: "x@test", Groups: []string{"alt.test"}, Size: 4}
+
+	start := time.Now()
+	if err := postYencRetrying(context.Background(), mockPool, nil, nil, nil, art, []byte("body"), 5, 10*time.Millisecond); err != nil {
+		t.Fatalf("post after four drops: %v", err)
+	}
+	if waited := time.Since(start); waited < 40*time.Millisecond {
+		t.Fatalf("waited %v between attempts, want at least 40ms", waited)
+	}
 }

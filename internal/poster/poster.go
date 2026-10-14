@@ -1610,7 +1610,7 @@ func (p *poster) postArticleWithBody(ctx context.Context, art *article.Article, 
 	// Delegate to the shared posting primitive so the normal and durable
 	// re-post paths build identical headers and apply the same stale-connection
 	// retry, throttle and stats accounting.
-	return postYenc(ctx, p.uploadPool, p.throttle, p.stats, p.engine.UploadMeter(), art, body)
+	return postYencRetrying(ctx, p.uploadPool, p.throttle, p.stats, p.engine.UploadMeter(), art, body, p.cfg.MaxRetries, p.cfg.RetryDelay.ToDuration())
 }
 
 // isStaleConnError reports whether err looks like a stale pooled connection:
@@ -1627,7 +1627,7 @@ func isStaleConnError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, net.ErrClosed) {
 		return true
 	}
 	var ne net.Error
@@ -1637,7 +1637,8 @@ func isStaleConnError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "broken pipe") ||
 		strings.Contains(msg, "connection reset by peer") ||
-		strings.Contains(msg, "i/o timeout")
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "use of closed network connection")
 }
 
 // checkArticle checks if an article exists using the check pool

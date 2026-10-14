@@ -48,6 +48,8 @@ func TestIsStaleConnError(t *testing.T) {
 		{name: "string i/o timeout", err: errors.New("read tcp 1.2.3.4:42->5.6.7.8:563: i/o timeout"), want: true},
 		{name: "net.Error non-timeout", err: fakeNonTimeoutNetErr{}, want: false},
 		{name: "io.EOF", err: io.EOF, want: false},
+		{name: "net.ErrClosed", err: fmt.Errorf("read: %w", net.ErrClosed), want: true},
+		{name: "string closed connection", err: errors.New("nntp: post failed: host:563+u: read tcp4 10.0.0.1:1->10.0.0.2:563: use of closed network connection"), want: true},
 		{name: "generic error", err: errors.New("posting forbidden"), want: false},
 	}
 

@@ -23,6 +23,15 @@ import (
 // durable re-post path (Reposter.Repost); extracting it keeps the exact same
 // Message-ID and header handling for re-posts.
 func postYenc(ctx context.Context, uploadPool pool.NNTPClient, throttle *Throttle, stats *Stats, meter *UploadMeter, art *article.Article, body []byte) error {
+	return postYencRetrying(ctx, uploadPool, throttle, stats, meter, art, body, 3, 0)
+}
+
+// postYencRetrying is postYenc with the number of attempts a stale or dropped
+// connection gets (3 when unset), and the wait between them.
+func postYencRetrying(ctx context.Context, uploadPool pool.NNTPClient, throttle *Throttle, stats *Stats, meter *UploadMeter, art *article.Article, body []byte, attempts int, delay time.Duration) error {
+	if attempts < 1 {
+		attempts = 3
+	}
 	headers := nntppool.PostHeaders{
 		From:       art.From,
 		Subject:    art.Subject,
@@ -58,20 +67,26 @@ func postYenc(ctx context.Context, uploadPool pool.NNTPClient, throttle *Throttl
 		throttle.Wait(int64(art.Size))
 	}
 
-	// Post article with timeout to prevent indefinite TLS hangs.
-	postCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-
 	// Retry on stale pooled connection (see isStaleConnError). bytes.NewReader
 	// is cheap to recreate so the body is fully re-readable on each attempt.
+	// Each attempt has its own timeout, to prevent indefinite TLS hangs.
 	var lastErr error
-	for attempt := range 3 {
+	for attempt := range attempts {
 		if attempt > 0 {
 			slog.WarnContext(ctx, "Retrying article post after stale pooled connection",
 				"messageID", art.MessageID, "attempt", attempt, "prevErr", lastErr.Error())
+			if delay > 0 {
+				select {
+				case <-ctx.Done():
+					return context.Canceled
+				case <-time.After(delay):
+				}
+			}
 		}
 
+		postCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		_, lastErr = uploadPool.PostYenc(postCtx, headers, bytes.NewReader(body), meta)
+		cancel()
 		if lastErr == nil {
 			meter.Record(int64(len(body)))
 			break
@@ -81,8 +96,8 @@ func postYenc(ctx context.Context, uploadPool pool.NNTPClient, throttle *Throttl
 				// The caller's context ended: report a genuine cancellation.
 				return context.Canceled
 			}
-			// The internal 2-minute post budget expired while the parent
-			// context is still alive. Surface a real error — mapping it to
+			// The attempt's 2-minute budget expired while the parent context
+			// is still alive. Surface a real error — mapping it to
 			// context.Canceled made callers treat it as a user cancellation,
 			// skip error reporting, and hang Post() forever.
 			return fmt.Errorf("posting article timed out: %w", lastErr)
