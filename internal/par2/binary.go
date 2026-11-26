@@ -121,7 +121,10 @@ func (b *BinaryExecutor) CreateSet(ctx context.Context, files []fileinfo.FileInf
 		"-r", fmt.Sprintf("%d", numRecovery),
 		"-o", outputBase,
 		"--filepath-base", folderDir,
-		"--filepath-format", "outrel",
+		// "path" is relative to --filepath-base; "outrel" would be relative
+		// to the output PAR2 file, which lives in the work directory, and
+		// record "../../name" for every file.
+		"--filepath-format", "path",
 	}
 	args = append(args, b.cfg.ParparExtraArgs...)
 	for _, f := range inputs {
